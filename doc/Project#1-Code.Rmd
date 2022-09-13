@@ -1,0 +1,37 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(knitr)
+text <- read.csv('~/Desktop/Columbia/:2022 fall/5243 Applied Data Science/fall2022-project1-YayuanWang/data/philosophy_data.csv')
+```
+
+```{r}
+colnames(text)
+head(text)
+```
+
+```{r}
+unique(text$author)
+unique(text$school)
+```
+
+```{r}
+# kable(print(prop.table(table(text$school))))
+
+freq_table <- text %>% 
+  group_by(school) %>% 
+  summarise(first_mentioned_date = min(original_publication_date), frequency = n()/nrow(text))
+freq_table
+# freq_table[order(freq_table$first_mentioned_date),]     #order by the first_mentioned_date
+```
+```{r}
+text[,school = 'analytic']
+text %>%
+  group_by(school) %>%
+  mutate(all_names = paste(lemmatized_str, collapse = " | "))
+```
+
