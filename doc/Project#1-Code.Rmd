@@ -1,37 +1,481 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "The Story of Philosophy"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
 ---
 
-```{r}
+```{r, include = FALSE, message = FALSE, warning = FALSE}
+options(digits=4)
+
 library(tidyverse)
 library(knitr)
+library(dplyr)
+library(beeswarm)
+library(tokenizers)
+library(tm)
+library(wordcloud2)
+library(manipulateWidget)
+
 text <- read.csv('~/Desktop/Columbia/:2022 fall/5243 Applied Data Science/fall2022-project1-YayuanWang/data/philosophy_data.csv')
 ```
 
-```{r}
-colnames(text)
-head(text)
-```
 
-```{r}
-unique(text$author)
+This project mainly has two goals. 
+The first one is to understand the main idea of each school and find out the overall tendency of philosophical topics.
+The second one is to figure out whether each school has its own writing style and if it changes over time. 
+Finally, based on what has been done in this project, future improvements are also brought up at the end. 
+
+
+
+```{r, include = FALSE, message = FALSE, warning = FALSE}
+# the number of sentences
+nrow(text)
+
+# number of texts/titles of work
+length(unique(text$title))
+
+# names of ten schools
 unique(text$school)
+
+# there are 36 authors in total
+length(unique(text$author)) 
+
+# time range of the text
+min(text$original_publication_date)
+max(text$original_publication_date)
+
+# work that was first issued
+unique(text[text$original_publication_date == min(text$original_publication_date), ]$title)
+
+# work that was published more recently
+unique(text[text$original_publication_date == max(text$original_publication_date), ]$title)
+
 ```
 
-```{r}
-# kable(print(prop.table(table(text$school))))
+```{r, echo=FALSE}
+# mutate the first publicated date to the text table
+text <- text %>%
+  mutate(first_publicated_date =
+    case_when(school == "analytic" ~ min(text[text$school == "analytic",]$original_publication_date),
+              school == "aristotle" ~ min(text[text$school == "aristotle",]$original_publication_date),
+              school == "capitalism" ~ min(text[text$school == "capitalism",]$original_publication_date),
+              school == "communism" ~ min(text[text$school == "communism",]$original_publication_date),
+              school == "continental" ~ min(text[text$school == "continental",]$original_publication_date),
+              school == "empiricism" ~ min(text[text$school == "empiricism",]$original_publication_date),
+              school == "feminism" ~ min(text[text$school == "feminism",]$original_publication_date),
+              school == "german_idealism" ~ min(text[text$school == "german_idealism",]$original_publication_date),
+              school == "nietzsche" ~ min(text[text$school == "nietzsche",]$original_publication_date),
+              school == "phenomenology" ~ min(text[text$school == "phenomenology",]$original_publication_date),
+              school == "plato" ~ min(text[text$school == "plato",]$original_publication_date),
+              school == "rationalism" ~ min(text[text$school == "rationalism",]$original_publication_date),
+              school == "stoicism" ~ min(text[text$school == "stoicism",]$original_publication_date),
+    )
+  )
+```
 
-freq_table <- text %>% 
+```{r, echo=FALSE}
+# Concatenate school and year into one string
+text$school.year <- paste(text$school, "(", text$first_publicated_date, ")")
+
+# Concatenate author and school into one string
+text$author.school <- paste(text$author, "(", text$school, ")") 
+
+# Concatenate author and published year
+text$author.year <- paste(text$author, "(", text$original_publication_date, ")") 
+```
+
+Firstly, without discussing all of the schools and their main ideas, let's look at how our data is composed and some basic information.
+
+The data set is downloaded from [link](https://www.kaggle.com/kouroshalizadeh/history-of-philosophy), containing more than 300,000 sentences from 59 texts covering 13 major schools of philosophy from ancient times to recent. The 13 major schools are Plato, Aristotle, Empiricism, Rationalism, Analytic Philosophy, Continental Philosophy, Phenomenology, German Idealism, Communism, Capitalism, Stoicism, Nietzsche, and Feminism respectively. In addition, There are a total of 36 authors/philosophers included in this data set, and each only belongs to one specific school (so no author/philosopher represents two schools simultaneously. A detailed school-and-author-mapping table could be found below: 
+
+```{r, echo=FALSE}
+# check the relationship between author and school
+
+school.author <- unique(text[,c('school','author', 'first_publicated_date')]) # one author only belongs to one school
+school.author <- school.author %>% 
   group_by(school) %>% 
-  summarise(first_mentioned_date = min(original_publication_date), frequency = n()/nrow(text))
-freq_table
-# freq_table[order(freq_table$first_mentioned_date),]     #order by the first_mentioned_date
+  summarize(date = min(first_publicated_date),
+    authors = paste(author, collapse = "; "))
+school.author <- school.author %>% 
+  arrange(date)
+
+
+# the frequency of each school in our dataset
+freq_table <- text %>%
+  group_by(school.year) %>%
+  summarise(date = min(first_publicated_date),
+            frequency = round(n()/nrow(text), 4))
+freq_table <- freq_table %>% 
+  arrange(date)
+
+school.author <- cbind(school.author, freq_table$frequency)
+
+colnames(school.author) <- c("School", "First Published Date", "Author(s)", "Frequency")
+kable(school.author)
 ```
-```{r}
-text[,school = 'analytic']
-text %>%
-  group_by(school) %>%
-  mutate(all_names = paste(lemmatized_str, collapse = " | "))
+
+```{r, include = FALSE}
+# the name of work published by Plato
+unique(text[text$author == "Plato", ]$title)
+
+# the most recent work
+unique(text[text$original_publication_date == 1961, ]$author.school)
+unique(text[text$original_publication_date == 1961, ]$title)
+```
+
+According to the table, we could observe that philosophical questions were first brought up by Plato in 350 B.C, and the work was called *Plato - Complete Works*. The most recent school that appeared is Continental Philosophy which was first arisen by Foucault in his work called *History of Madness* in 1961. 
+
+
+Among all 13 schools, the top 3 schools that have been largely talked about are Analytic Philosophy (15.36%), Aristotle (13.52%), and German Idealism (13.52%). And not surprisingly, Analytics Philosophy also has the most number of representatives: Russell, Moore, Wittgenstein, Lewis,  Quine, Popper, and Kripke. 
+
+
+```{r, echo=FALSE}
+# Pie chart
+pie(freq_table$frequency, labels = freq_table$school.year,
+    main = "The Proportion of Each School (year)")
+```
+
+# Main Idea of Each School
+
+After getting a brief glimpse of the overall dataset, let’s look at each individual school to learn their main idea and try to find the common theme and tendency. Notice that even though the original publish year is included in our dataset, it only represents the publish time of a certain author’s work but not the appearance of an entire school. For example, Stoicism is founded as early as the early 3rd century BC., but in our dataset, the earliest work of Stoicism was published in 125 by Epictetus who is a representative of late Stoicism. Therefore, while we are looking into each school and their frequently used words, keep in mind that they are only partly not fully eligible to speak for their schools or a certain era. 
+
+Moreover, since some authors/schools have an abundant amount of work, we only use a subset of their work to plot word clouds if the sample size is too large. 
+
+```{r, echo=FALSE}
+generate.wordcloud <- function(df,x){
+  wc.docs <- df[df$author == x,]
+
+  # combine all sentences from one author into one single string
+  wc.docs <- str_c(wc.docs$sentence_lowered, collapse = " ")
+
+  # load text data as a corpus
+  wc.docs <- Corpus(VectorSource(wc.docs))
+
+  wc.docs <- wc.docs %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace) %>% 
+    tm_map(removeWords, stopwords("english")) %>% 
+    tm_map(stemDocument)
+
+  # wc.docs <- tm_map(wc.docs, removeWords, stopwords("english"))
+  dtm <- TermDocumentMatrix(wc.docs)
+  matrix <- as.matrix(dtm)
+  words <- sort(rowSums(matrix), decreasing=TRUE)
+  wc.df <- data.frame(word = names(words),freq=words)
+
+  myplot <- wordcloud2(data = wc.df[1:150,], color = "cornflowerblue", shape = "circle")
+  return(myplot)}
+```
+ 
+**Plato**
+
+Plato is the most prestigious and well-known philosopher in ancient Greek. He is famous for his central doctrines theory which mainly discusses how this world is composed of. According to Plato, there is a perfect realm where entities (also called “forms” and “ideas”) are real, changeless, and eternal. However, the world that we can sense is defective and filled with changes. For example, we can see all the different trees with various shapes, but in the real realm, there is one perfect tree model. With this background, we could notice that the constantly appearing words in the text are *one*, *thing*, *will*, *good*, *think*, *soul*, *people*, *man*, *god*, and *Socrates*.
+
+```{r, warning=FALSE, echo = FALSE}
+set.seed(1234)
+Plato.sample <- text[text$author == "Plato",]
+Plato.sample <- Plato.sample[sample(nrow(Plato.sample), round(nrow(Plato.sample)*0.5)),]
+
+combineWidgets(generate.wordcloud(Plato.sample, "Plato"))
+```
+
+**Aristotle**
+
+Aristotle is the most famous student of Plato. Hence, we could observe very similar frequently used words from Aristotle’s work, such as *one*, *thing*, *will*, *man*, and *good*. In addition to that, Aristotle also made huge contributions to the field of reasoning, which is confirmed by the word cloud which contains more *reason* and *fact*. 
+
+```{r, warning=FALSE, echo = FALSE}
+set.seed(1234)
+Aristotle.sample <- text[text$author == "Aristotle",]
+Aristotle.sample <- Aristotle.sample[sample(nrow(Aristotle.sample), round(nrow(Aristotle.sample)*0.5)),]
+
+combineWidgets(generate.wordcloud(Aristotle.sample, "Aristotle"))
+```
+
+**Stoicism**
+
+Stoicism was trying to answer how people could live their best possible lives. From the word cloud displayed below (the upper one is Epictetus and the lower one is Marcus Aurelius), we could see that the most frequently used words are *will*, *one*, *thing*, *power*, *good*, *reason*, *nature*, and *world*. 
+ 
+```{r, warning=FALSE, echo=FALSE}
+w1 <- generate.wordcloud(text, "Epictetus")
+w2 <- generate.wordcloud(text, "Marcus Aurelius")
+
+combineWidgets(w1, w2)
+```
+
+**Rationalism**
+
+Rationalism mainly focuses on how we understand the world and gain knowledge from our experiences. According to the word clouds (from upper left to lower right are Descartes, Leibniz, Malebranche, and Spinoza), the constantly mentioned words are very similar: *one*, *reason*, *can*, *will*, *sense*, *see*, *idea*, *god*, *exist*, *good*, and *evil*.
+
+
+```{r, warning=FALSE, echo=FALSE}
+w3 <- generate.wordcloud(text, "Descartes")
+w4 <- generate.wordcloud(text, "Leibniz")
+w5 <- generate.wordcloud(text, "Malebranche")
+w6 <- generate.wordcloud(text, "Spinoza")
+
+combineWidgets(w3, w4, w5, w6)
+```
+
+
+**Empiricism**
+
+The primary issue of Empiricism is very similar to Rationalism. Differently, Empiricism argues that our experience is the only source of ideas. The word clouds illustrate the work of Locke, Hume, and Berkeley respectively. Interestingly, among all three authors, the top one word is *idea*. Besides it, their work largely mentioned *one*, *sense*, *body*, *may*, and *exist*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w7 <- generate.wordcloud(text, "Locke")
+w8 <- generate.wordcloud(text, "Hume")
+w9 <- generate.wordcloud(text, "Berkeley")
+
+combineWidgets(w7, w8, w9)
+```
+
+**Capitalism**
+
+After the first industrial revolution, topics related to economic and social systems became mainstream. Referring to the word clouds of Smith, Ricardo, and Keynes respectively, the main focuses are *labour*, *wage*, *tax*, *rent*, *law*, *trade*, *asset*, and *community*. 
+
+
+```{r, warning=FALSE, echo=FALSE}
+w10 <- generate.wordcloud(text, "Smith")
+w11 <- generate.wordcloud(text, "Ricardo")
+w12 <- generate.wordcloud(text, "Keynes")
+
+combineWidgets(w10, w11, w12)
+```
+
+**German Idealism**
+
+German idealism refers to the movement in German philosophy that began in the 1780s. Even though different philosophers held various views, they are all committed to idealism. From the word clouds of Kant, Fichte, and Hegel, they all mentioned a lot of *one*, *self*, *nature*, *exist*, *law*, and *free*.
+
+```{r, warning=FALSE, echo=FALSE}
+w13 <- generate.wordcloud(text, "Kant")
+w14 <- generate.wordcloud(text, "Fichte")
+w15 <- generate.wordcloud(text, "Hegel")
+
+combineWidgets(w13, w14, w15)
+```
+**Feminism**
+
+Feminism cares about social, economic, and political equality for women. Therefore, not surprisingly, they talk a lot about *women*, *men*, *girl*, *wife*, *love*, *sex*, and *racist*. Moreover, since social class, ethnicity, and education level all have an impact on one’s experience of being a woman, feminism also frequently mentioned *white*, *black*, *slavery*, *worker*, and *labor*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w16 <- generate.wordcloud(text, "Wollstonecraft")
+w17 <- generate.wordcloud(text, "Beauvoir")
+w18 <- generate.wordcloud(text, "Davis")
+
+combineWidgets(w16, w17, w18)
+```
+
+**Communism**
+
+Similarly to capitalism, communism debates issues about relationships among people within society. Different from capitalism, communism believes in public ownership and socialism. Therefore, most of their discussion focuses on *worker*, *labour*, *state*, *power*, *capitalist*, *money*, *produce*, and *industry*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w19 <- generate.wordcloud(text, "Marx")
+w20 <- generate.wordcloud(text, "Lenin")
+
+combineWidgets(w19, w20)
+```
+
+**Nietzsche**
+
+Nietzsche is well-known for his famous quote “God is dead”. With the rise of science and the development of society, people were facing a fundamental crisis in value. Is science able to tell us everything about this world? Or is there something crucial that cannot be explained by science? Nietzsche tried to answer this question, so he mentioned a lot *one*, *life*, *man*, *good*, *world*, *spirit*, *god*, *moral*, *soul*, and *truth*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w21 <- generate.wordcloud(text, "Nietzsche")
+
+combineWidgets(w21)
+```
+
+**Phenomenology**
+
+Phenomenology claims that the ultimate sources of meaning and value are built in people’s experiences, including scientific theories and aesthetic judgments. From the word clouds of Merleau-Ponty, Husserl, and Heidegger, we could notice that they mention a lot of *essence*, *nature*, *science*, *life*, *time*, and *sense*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w22 <- generate.wordcloud(text, "Merleau-Ponty")
+w23 <- generate.wordcloud(text, "Husserl")
+w24 <- generate.wordcloud(text, "Heidegger")
+
+combineWidgets(w22, w23, w24)
+```
+
+**Analytic philosophy**
+
+Analytic philosophy is characterized by an emphasis on language and its clarity and rigor in arguments, trying to answer bigger problems from smaller questions. Considering the dataset size, only Russell, Lewis, Quine, and Wittgenstein are selected while plotting word clouds. Constantly mentioned words are *one*, *true*, *observe*, *say*, *word*, *event*, *see*, *sense*, and *fact*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w25 <- generate.wordcloud(text, "Russell")
+w26 <- generate.wordcloud(text, "Lewis")
+w27 <- generate.wordcloud(text, "Quine")
+w28 <- generate.wordcloud(text, "Wittgenstein")
+
+combineWidgets(w25, w26, w27, w28)
+```
+
+**Continental philosophy**
+
+Continental philosophy describes some philosophers whose methodologies are not fully categorized into analytic philosophy. Therefore, we could obverse from the word clouds of Foucault, Derrida, and Deleuze that the frequently used words are very similar to those of analytic philosophy, such as *one*, *say*, *will*, *sense*, *truth*, *social*, and *see*. 
+
+```{r, warning=FALSE, echo=FALSE}
+w29 <- generate.wordcloud(text, "Foucault")
+w30 <- generate.wordcloud(text, "Derrida")
+w31 <- generate.wordcloud(text, "Deleuze")
+
+
+combineWidgets(w29, w30, w31)
+```
+
+
+**Overall Tendency**
+
+By understanding keywords and the era of each philosophy's idea, we are able to identify some main topics and their evolvement over time. In ancient times, people are curious about how this world is composed, who we are, how we sense or understand this world, and how we gain knowledge. Besides these questions, people also cared about good and happiness, trying to answer how we could live the best of our lives. The key schools are Plato, Aristotle, Stoicism, Rationalism, and Empiricism. 
+
+Whereas, with the emergence of the Industrial Age, people’s attention shifted from themselves to social and relationships with other social participants. The representative schools are capitalism and communism. In addition, people believe in equality and social justice, and the rise of feminism is exactly a good example. 
+
+As science rapidly developed and progressed, people realize that many unexplained things and phenomena can all be understood by certain scientific theories or mathematical/physical formulas. Then our understanding of this world is doubted again. Does god exist? Is there anything that cannot be explained by science? Nietzsche is a key philosopher who made huge contributions to this field of debate. 
+
+
+# Writing Style
+
+After understanding each school and how the hot-debated topics evolved from ancient times to modern times, another question arose: does there exist one writing style for one school? And does it change over time? 
+
+Let’s try to answer this question by plotting box plots of word counts of sentences for each school.  
+
+
+```{r, echo=FALSE}
+# count how many words in a single sentence
+docs <- text %>%
+  mutate(counts = str_count(text$sentence_str, pattern = " "))
+
+# box plot of word count in a single sentence for different schools, ordered by the first published year
+ggplot(docs, aes(x=reorder(school.year,-first_publicated_date), y=counts)) +
+  geom_boxplot(aes(fill = school.year), show.legend = FALSE) +
+  xlab("School (year)") + ylab("Number of Words in a Sentence") +
+  coord_flip() +
+  theme_bw()
+```
+
+From the box plot, we could notice that in ancient times, the sentences tended to be short and concise with little deviation, such as Plato and Stoicism. While in the most recent period, the text is more likely to include long and complex sentences, such as Continental philosophy. One explanation for this is that before the adaption of papermaking and printing, philosophers publicized their ideas mainly via talking and lobbying. So when people tried to organize and record their thoughts, sentences are relatively short. 
+
+
+```{r, include=FALSE}
+# # the longest sentence
+# docs[docs$school == "continental" &  docs$counts > 400,]$sentence_str
+```
+
+However, as we discussed above, one school has at least one representative author. Therefore, is that possible that the pattern we observed previously is caused by authors but not schools? Let’s then randomly select some authors and plot the word counts in the order of their publish year. 
+
+```{r, echo=FALSE}
+# box plot of word count in a single sentence for different authors
+ggplot(docs[docs$school %in% c("empiricism", "continental","plato", "aristotle","nietzsche","stoicism", "communism"),],
+       aes(x=reorder(author.school,-first_publicated_date), y=counts)) +
+  geom_boxplot(aes(fill = author.school), show.legend = FALSE) +
+  xlab("Author (School)") + ylab("Number of Words in a Sentence") +
+  coord_flip() +
+  theme_bw()
+```
+```{r, echo=FALSE}
+# box plot of word count in a single sentence for different authors
+ggplot(docs[docs$school %in% c("empiricism", "continental","plato", "aristotle","nietzsche","stoicism", "communism"),],
+       aes(x=reorder(author.year,-original_publication_date), y=counts)) +
+  geom_boxplot(aes(fill = author.year), show.legend = FALSE) +
+  xlab("Author (Year)") + ylab("Number of Words in a Sentence") +
+  coord_flip() +
+  theme_bw()
+```
+
+Based on the two box plots above, we can conclude that there is no stable writing style existing within one school. For example, Epictetus, a representative of Stoicism, published his work in 125. He hardly wrote long sentences. Derrida, a representative of Continental Philosophy who published his work in 1961, also had a similar writing style. However, another philosopher from Continental Philosophy, Deleuze, liked to use long sentences to clarify his points. Therefore, we could draw the conclusion that individual differences do exist, but there is no certain writing style that could represent a whole school. See more detailed information, please refer to the following table that lists the mean and standard deviation of word counts for each school. 
+
+```{r, echo=FALSE}
+# Summary table shows word counts information for each author
+counts_summary <- docs %>%
+  group_by(author.school) %>%
+  summarise(Mean = mean(counts), Std.Dev = sd(counts), Date = mean(first_publicated_date))
+kable(counts_summary %>% arrange(Date))
+```
+
+
+# Furture Improvement
+
+Due to time constraints, there are many other interesting attempts that haven’t been tried. One thing that would be worthy to try is topic modeling. As we discussed above, we could identify several obvious shifts along the time. Can we separate all schools into three main categories? 
+
+The first one focuses on *self* which tries to answer the questions such as who we are, whether people have free will, and whether body and mind are the same things. 
+
+The second domain is about the *world* and our interaction with it, questions could cover how the world is created, how people sense the world, and how people gain knowledge about and make reference to the world. 
+
+The final topic is about *society* and the relationship among people, helping people to understand the interaction with other people, social and economic systems, equality, and social justice. 
+
+Topic modeling would assist us to cluster schools into three (or more) main fields. Then we could study if it’s enough to capture all the main ideas. And it would be even more interesting to see if authors from one school could be classified into different fields. 
+
+
+```{r, include=FALSE}
+#
+# I tried topic modeling but didn't finish up because of time constraints, the following are some codes
+#
+
+
+
+# docs1 <- docs %>% 
+#   filter(counts != 0) 
+# 
+# docs1$sent.id <- 1:nrow(docs1)
+# corpus.list=docs1[2:(nrow(docs1)-1), ]
+# sentence.pre=docs1$sentence_lowered[1:(nrow(docs1)-2)]
+# sentence.post=docs1$sentence_lowered[3:(nrow(docs1)-1)]
+# corpus.list$snipets=paste(sentence.pre, corpus.list$sentence_lowered, sentence.post, sep=" ")
+# 
+# set.seed(1234)
+# corpus.list.sample <- corpus.list[sample(nrow(corpus.list), round(nrow(corpus.list)*0.1)), ]
+# 
+# corpus.list.sample$snipets[1]
+```
+
+```{r, warning = FALSE, include=FALSE}
+# myDocs <- Corpus(VectorSource(corpus.list.sample$snipets))
+# 
+# myDocs <- myDocs %>%
+#   tm_map(removeNumbers) %>%
+#   tm_map(removePunctuation) %>%
+#   tm_map(stripWhitespace) %>% 
+#   tm_map(stemDocument)
+# 
+# myDocs <- tm_map(myDocs, removeWords, stopwords("english"))
+# 
+# 
+# dtm <- DocumentTermMatrix(myDocs)
+# 
+# 
+# rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+# dtm  <- dtm[rowTotals> 0, ]
+# corpus.list.sample=corpus.list.sample[rowTotals>0, ]
+```
+
+
+```{r, include=FALSE}
+# #Set parameters for Gibbs sampling
+# burnin <- 4000
+# iter <- 2000
+# thin <- 500
+# seed <-list(2003,5,63,100001,765)
+# nstart <- 5
+# best <- TRUE
+# 
+# #Number of topics
+# k <- 4
+# #Run LDA using Gibbs sampling
+# ldaOut <-topicmodels::LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+#                                                  seed = seed, best=best,
+#                                                  burnin = burnin, iter = iter, 
+#                                                  thin=thin))
+# terms(ldaOut,20)
+# 
+# topics.terms <- as.matrix(terms(ldaOut,20))
+# topics.terms
+# 
+# 
+# ldaOut.topics <- as.matrix(topics(ldaOut))
+# table(c(1:k, ldaOut.topics))
 ```
 
